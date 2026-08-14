@@ -19,7 +19,7 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		NAME        = 'Meeting Invitations',
 		AUTHOR      = 'Convergent Cloud Computing',
 		URL         = 'https://www.convergent.tn',
-		VERSION     = '1.0.1',
+		VERSION     = '1.1.0',
 		RELEASE     = '2026-08-13',
 		REQUIRED    = '2.36.0',
 		CATEGORY    = 'Calendar',
@@ -108,8 +108,10 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		}
 
 		$sIcs      = (string) $this->jsonParam('Ics', '');
+		$sMode     = \strtolower((string) $this->jsonParam('Mode', 'respond'));
 		$sPartStat = \strtoupper((string) $this->jsonParam('PartStat', ''));
-		if (!\in_array($sPartStat, ['ACCEPTED', 'TENTATIVE', 'DECLINED'], true)) {
+		$bCancel   = ('cancel' === $sMode);
+		if (!$bCancel && !\in_array($sPartStat, ['ACCEPTED', 'TENTATIVE', 'DECLINED'], true)) {
 			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Invalid PARTSTAT']);
 		}
 		if (!\strlen($sIcs)) {
@@ -126,6 +128,37 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 			$oVCal = \Sabre\VObject\Reader::read($sIcs, \Sabre\VObject\Reader::OPTION_FORGIVING);
 			if (!($oVCal instanceof \Sabre\VObject\Component\VCalendar) || !isset($oVCal->VEVENT)) {
 				return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Not a calendar event']);
+			}
+
+			$sUid = (string) $oVCal->VEVENT->UID;
+			if (!\strlen($sUid)) {
+				return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Event has no UID']);
+			}
+			$sEventUrl = \rtrim($sUrl, '/') . '/' . \rawurlencode($sUid) . '.ics';
+			$iSequence = (int) ((string) ($oVCal->VEVENT->SEQUENCE ?? '0'));
+
+			// A CANCEL withdraws the meeting: drop our copy rather than storing
+			// a scheduling message. Absent from the calendar is not an error -
+			// the user may simply never have accepted it.
+			if ($bCancel) {
+				$iStatus = $this->request($oAccount, 'DELETE', $sEventUrl);
+				return $this->jsonResponse(__FUNCTION__, [
+					'success'  => (404 === $iStatus || 300 > $iStatus),
+					'partstat' => 'CANCELLED',
+					'status'   => $iStatus
+				]);
+			}
+
+			// SEQUENCE orders revisions of the same UID (RFC 5545 3.8.7.4). If
+			// the calendar already holds a newer revision, this invitation has
+			// been superseded - answering it would resurrect stale details.
+			$sExisting = $this->fetch($oAccount, $sEventUrl);
+			if (null !== $sExisting
+			 && \preg_match('/^SEQUENCE:(\d+)/mi', \str_replace("\r\n ", '', $sExisting), $aSeq)
+			 && (int) $aSeq[1] > $iSequence) {
+				return $this->jsonResponse(__FUNCTION__, ['success' => false,
+					'error' => 'A newer version of this invitation is already in your calendar'
+						. " (sequence {$aSeq[1]} vs {$iSequence})"]);
 			}
 
 			$aOwn   = $this->ownAddresses($oAccount);
@@ -150,17 +183,12 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 			// The stored copy is a plain event, not a scheduling message.
 			unset($oVCal->METHOD);
 
-			$sUid = (string) $oVCal->VEVENT->UID;
-			if (!\strlen($sUid)) {
-				return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Event has no UID']);
-			}
-
-			$oResponse = $this->put($oAccount, \rtrim($sUrl, '/') . '/' . \rawurlencode($sUid) . '.ics',
-				$oVCal->serialize());
+			$oResponse = $this->put($oAccount, $sEventUrl, $oVCal->serialize());
 
 			return $this->jsonResponse(__FUNCTION__, [
-				'success'  => true,
-				'partstat' => $sPartStat,
+				'success'   => true,
+				'partstat'  => $sPartStat,
+				'sequence'  => $iSequence,
 				// Present when the server took care of replying to the organiser.
 				'scheduled' => $oResponse
 			]);
@@ -171,15 +199,40 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 	}
 
 	/**
-	 * PUT the event into the user's calendar using their own credentials.
+	 * GET the current copy of an event, or null when it is not there.
 	 */
-	private function put(\RainLoop\Model\Account $oAccount, string $sUrl, string $sBody) : bool
+	private function fetch(\RainLoop\Model\Account $oAccount, string $sUrl) : ?string
+	{
+		$oResponse = $this->http($oAccount)->doRequest('GET', $sUrl);
+		return ($oResponse && 200 === $oResponse->status) ? $oResponse->body : null;
+	}
+
+	/**
+	 * Issue a request that has no body and report the status.
+	 */
+	private function request(\RainLoop\Model\Account $oAccount, string $sMethod, string $sUrl) : int
+	{
+		$oResponse = $this->http($oAccount)->doRequest($sMethod, $sUrl);
+		$iStatus = $oResponse ? $oResponse->status : 0;
+		\SnappyMail\Log::info('Invitations', "{$sMethod} {$sUrl} ({$iStatus})");
+		return $iStatus;
+	}
+
+	private function http(\RainLoop\Model\Account $oAccount) : \SnappyMail\HTTP\Request
 	{
 		$oHTTP = \SnappyMail\HTTP\Request::factory();
 		$oHTTP->verify_peer = !!$this->Config()->Get('plugin', 'verify_peer', true);
 		$oHTTP->timeout = 20;
 		$oHTTP->setAuth(3, $oAccount->Email(), $oAccount->ImapPass());
-		$oResponse = $oHTTP->doRequest('PUT', $sUrl, $sBody,
+		return $oHTTP;
+	}
+
+	/**
+	 * PUT the event into the user's calendar using their own credentials.
+	 */
+	private function put(\RainLoop\Model\Account $oAccount, string $sUrl, string $sBody) : bool
+	{
+		$oResponse = $this->http($oAccount)->doRequest('PUT', $sUrl, $sBody,
 			array('Content-Type' => 'text/calendar; charset=utf-8'));
 		if (!$oResponse || 300 <= $oResponse->status) {
 			throw new \RuntimeException('CalDAV PUT failed with status '

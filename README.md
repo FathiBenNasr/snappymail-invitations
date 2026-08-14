@@ -42,13 +42,29 @@ Admin → Plugins → invitations:
 Nothing is hardcoded; with no template configured the plugin declines to act
 rather than guess a URL.
 
+## Cancellations and updates
+
+`METHOD:CANCEL` is recognised: the meeting is shown as cancelled and a single
+button removes it from the calendar. A cancellation for an event that was never
+accepted is not an error.
+
+`SEQUENCE` orders revisions of the same `UID`
+([RFC 5545 3.8.7.4](https://www.rfc-editor.org/rfc/rfc5545#section-3.8.7.4)).
+Before answering, the plugin compares the invitation against the copy already in
+the calendar and refuses one that has been superseded, so answering an old mail
+after a reschedule cannot resurrect the old time. A newer revision replaces the
+stored copy as usual.
+
 ## Notes and limits
 
-* Only `METHOD:REQUEST` gets buttons. `REPLY` and `CANCEL` are informational.
+* `METHOD:REPLY` is another attendee answering and needs no action here.
 * The invitation is matched against your account address *and* your configured
   identities, so invitations sent to an alias are recognised.
 * The event is stored without `METHOD`: a calendar holds events, not scheduling
   messages.
+* Event details are read from the `VEVENT` only. `VTIMEZONE` carries its own
+  `DTSTART` per transition rule, so reading the first one in the document shows
+  a date like 1905 instead of the meeting.
 * Authentication reuses the account's own IMAP credentials.
 
 ## Authors

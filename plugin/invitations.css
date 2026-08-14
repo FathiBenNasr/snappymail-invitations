@@ -12,3 +12,5 @@
 .meeting-invitation-detail td:first-child { opacity: .7; white-space: nowrap; }
 .meeting-invitation-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .meeting-invitation-result { margin-top: 8px; font-weight: 600; }
+.meeting-invitation-cancelled { margin: 6px 0; font-weight: 600; opacity: .85; }
+.meeting-invitation.cancelled { border-left-color: #e9322d; }
