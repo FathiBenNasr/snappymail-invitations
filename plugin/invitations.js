@@ -87,26 +87,49 @@ addEventListener('rl-view-model.create', e => {
 		view.meetingInvite(null);
 		view.meetingResult('');
 		if (!msg) return;
-		const part = msg.attachments && msg.attachments.find(a => 'text/calendar' == a.mimeType);
-		if (!part || !part.download) return;
+		// attachments is a ko.observableArray, so it must be unwrapped before
+		// array methods are used on it.
+		const list = (typeof msg.attachments === 'function' ? msg.attachments() : msg.attachments) || [];
 
-		rl.fetch(part.linkDownload())
-			.then(response => response.status < 400 ? response.text() : Promise.reject(response.status))
-			.then(raw => {
-				const text = unfold(raw);
-				// Only METHOD:REQUEST asks the recipient a question. REPLY and
-				// CANCEL are informational here and get no buttons.
-				if (!/^METHOD:REQUEST\s*$/mi.test(text)) return;
-				view.meetingInvite({
-					ics:       raw,
-					summary:   field(text, 'SUMMARY') || 'Meeting invitation',
-					organizer: field(text, 'ORGANIZER').replace(/^mailto:/i, ''),
-					location:  field(text, 'LOCATION'),
-					start:     icalDate(field(text, 'DTSTART')),
-					end:       icalDate(field(text, 'DTEND'))
+		// An invitation reaches us in more than one shape. Evolution and
+		// Exchange send the scheduling part inline inside multipart/alternative
+		// as text/calendar and repeat it as an application/ics attachment, so
+		// match on type or on the file name and try each candidate in turn.
+		const candidates = list.filter(a => a && a.download && (
+			'text/calendar' === a.mimeType
+			|| 'application/ics' === a.mimeType
+			|| 'text/x-vcalendar' === a.mimeType
+			|| /\.ics$/i.test(a.fileName || '')));
+
+		if (!candidates.length) return;
+
+		const tryNext = i => {
+			if (i >= candidates.length) return;
+			rl.fetch(candidates[i].linkDownload())
+				.then(response => response.status < 400 ? response.text() : Promise.reject(response.status))
+				.then(raw => {
+					const text = unfold(raw);
+					// Only METHOD:REQUEST asks the recipient a question. REPLY
+					// and CANCEL are informational here and get no buttons.
+					if (!/^METHOD:REQUEST\s*$/mi.test(text)) {
+						tryNext(i + 1);
+						return;
+					}
+					view.meetingInvite({
+						ics:       raw,
+						summary:   field(text, 'SUMMARY') || 'Meeting invitation',
+						organizer: field(text, 'ORGANIZER').replace(/^mailto:/i, ''),
+						location:  field(text, 'LOCATION'),
+						start:     icalDate(field(text, 'DTSTART')),
+						end:       icalDate(field(text, 'DTEND'))
+					});
+				})
+				.catch(err => {
+					console.error('[invitations]', err);
+					tryNext(i + 1);
 				});
-			})
-			.catch(err => console.error('[invitations]', err));
+		};
+		tryNext(0);
 	});
 });
 

@@ -19,7 +19,7 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		NAME        = 'Meeting Invitations',
 		AUTHOR      = 'Convergent Cloud Computing',
 		URL         = 'https://www.convergent.tn',
-		VERSION     = '1.0.0',
+		VERSION     = '1.0.1',
 		RELEASE     = '2026-08-13',
 		REQUIRED    = '2.36.0',
 		CATEGORY    = 'Calendar',
