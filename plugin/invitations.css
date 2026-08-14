@@ -1,0 +1,14 @@
+.meeting-invitation {
+	border: 1px solid var(--border-color, #ccc);
+	border-left: 4px solid var(--brand-color, #00639a);
+	border-radius: 6px;
+	padding: 10px 14px;
+	margin: 8px 0;
+}
+.meeting-invitation-head { display: flex; align-items: center; gap: 8px; font-size: 1.1em; }
+.meeting-invitation-title { font-weight: 600; }
+.meeting-invitation-detail { margin: 8px 0; border-collapse: collapse; }
+.meeting-invitation-detail td { padding: 2px 12px 2px 0; vertical-align: top; }
+.meeting-invitation-detail td:first-child { opacity: .7; white-space: nowrap; }
+.meeting-invitation-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.meeting-invitation-result { margin-top: 8px; font-weight: 600; }
