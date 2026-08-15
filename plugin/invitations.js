@@ -27,10 +27,20 @@ const
 
 addEventListener('rl-view-model.create', e => {
 	if (templateId !== e.detail.viewModelTemplateID) return;
+	// This plugin shares the message view with others. Anything thrown here
+	// must not escape and take their initialisation down with it.
+	try {
+		build(e.detail);
+	} catch (err) {
+		console.error('[invitations] disabled after error:', err);
+	}
+});
+
+const build = detail => {
 
 	const
 		template = document.getElementById(templateId),
-		view = e.detail,
+		view = detail,
 		attachmentsPlace = template.content.querySelector('.attachmentsPlace');
 
 	if (!attachmentsPlace) return;
@@ -151,6 +161,6 @@ addEventListener('rl-view-model.create', e => {
 		};
 		tryNext(0);
 	});
-});
+};
 
 })(window.rl);

@@ -48,6 +48,14 @@ rather than guess a URL.
 button removes it from the calendar. A cancellation for an event that was never
 accepted is not an error.
 
+A cancellation is also **recorded**, because deleting the event removes the very
+copy the `SEQUENCE` check compares against — without that record the original
+invitation mail could still be accepted afterwards and the meeting would come
+back, with a reply telling the organiser you had accepted a cancelled meeting.
+A later revision is still allowed through: that is the organiser reinstating the
+meeting rather than a stale mail being answered again. Records expire once the
+meeting has finished.
+
 `SEQUENCE` orders revisions of the same `UID`
 ([RFC 5545 3.8.7.4](https://www.rfc-editor.org/rfc/rfc5545#section-3.8.7.4)).
 Before answering, the plugin compares the invitation against the copy already in

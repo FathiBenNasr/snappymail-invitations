@@ -19,12 +19,17 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		NAME        = 'Meeting Invitations',
 		AUTHOR      = 'Convergent Cloud Computing',
 		URL         = 'https://www.convergent.tn',
-		VERSION     = '1.1.0',
+		VERSION     = '1.2.0',
 		RELEASE     = '2026-08-13',
 		REQUIRED    = '2.36.0',
 		CATEGORY    = 'Calendar',
 		LICENSE     = 'MIT',
 		DESCRIPTION = 'Accept, tentatively accept or decline meeting invitations and store them in your CalDAV calendar.';
+
+	/** Where processed cancellations are recorded, and how many to keep. */
+	private const
+		CANCELLED_KEY = 'invitations_cancelled',
+		CANCELLED_MAX = 200;
 
 	public function Init() : void
 	{
@@ -142,11 +147,30 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 			// the user may simply never have accepted it.
 			if ($bCancel) {
 				$iStatus = $this->request($oAccount, 'DELETE', $sEventUrl);
+				$bDone = (404 === $iStatus || 300 > $iStatus);
+				if ($bDone) {
+					// Record it. The SEQUENCE check below compares against the
+					// copy in the calendar, which this DELETE has just removed,
+					// so without a record the original invitation mail can still
+					// be accepted afterwards and the meeting comes back.
+					$this->rememberCancelled($oAccount, $sUid, $iSequence,
+						$this->eventEndsAt($oVCal->VEVENT));
+				}
 				return $this->jsonResponse(__FUNCTION__, [
-					'success'  => (404 === $iStatus || 300 > $iStatus),
+					'success'  => $bDone,
 					'partstat' => 'CANCELLED',
 					'status'   => $iStatus
 				]);
+			}
+
+			// Refuse an invitation the organiser has already withdrawn. A later
+			// revision is allowed through: that is the organiser reinstating the
+			// meeting, not the stale mail being answered again.
+			$aCancelled = $this->loadCancelled($oAccount);
+			if (isset($aCancelled[$sUid])
+			 && $iSequence <= (int) ($aCancelled[$sUid]['sequence'] ?? 0)) {
+				return $this->jsonResponse(__FUNCTION__, ['success' => false,
+					'error' => 'This meeting was cancelled by the organizer']);
 			}
 
 			// SEQUENCE orders revisions of the same UID (RFC 5545 3.8.7.4). If
@@ -196,6 +220,77 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 			\SnappyMail\Log::error('Invitations', $oException->getMessage());
 			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => $oException->getMessage()]);
 		}
+	}
+
+	/**
+	 * Cancellations this account has processed, keyed by UID.
+	 *
+	 * Needed because a cancellation deletes the calendar copy that the
+	 * SEQUENCE check would otherwise compare against, leaving nothing to stop
+	 * the original invitation mail being accepted again afterwards.
+	 */
+	private function loadCancelled(\RainLoop\Model\Account $oAccount) : array
+	{
+		try {
+			$mData = $this->Manager()->Actions()->StorageProvider()->Get($oAccount,
+				\RainLoop\Providers\Storage\Enumerations\StorageType::CONFIG,
+				self::CANCELLED_KEY);
+			if ($mData && \is_string($mData)) {
+				$aData = \json_decode($mData, true);
+				if (\is_array($aData)) {
+					return $aData;
+				}
+			}
+		} catch (\Throwable $oException) {
+			// An unreadable store must not stop the user answering an invitation.
+		}
+		return array();
+	}
+
+	private function rememberCancelled(\RainLoop\Model\Account $oAccount, string $sUid,
+		int $iSequence, int $iEndsAt) : void
+	{
+		$aList = $this->loadCancelled($oAccount);
+		$aList[$sUid] = array('sequence' => $iSequence, 'until' => $iEndsAt);
+
+		// Keep it from growing without bound: drop entries for meetings that
+		// have already finished, then cap what is left.
+		$iNow = \time();
+		$aList = \array_filter($aList, function ($aEntry) use ($iNow) {
+			return empty($aEntry['until']) || $aEntry['until'] > $iNow;
+		});
+		if (self::CANCELLED_MAX < \count($aList)) {
+			$aList = \array_slice($aList, -self::CANCELLED_MAX, null, true);
+		}
+
+		try {
+			$this->Manager()->Actions()->StorageProvider()->Put($oAccount,
+				\RainLoop\Providers\Storage\Enumerations\StorageType::CONFIG,
+				self::CANCELLED_KEY, \json_encode($aList));
+		} catch (\Throwable $oException) {
+			\SnappyMail\Log::notice('Invitations', 'could not record the cancellation: '
+				. $oException->getMessage());
+		}
+	}
+
+	/**
+	 * When the meeting finishes, as a unix timestamp. Used only to expire the
+	 * record above, so a rough answer is fine; falls back to a day after the
+	 * start, then to a week from now.
+	 */
+	private function eventEndsAt($oEvent) : int
+	{
+		try {
+			if (isset($oEvent->DTEND)) {
+				return $oEvent->DTEND->getDateTime()->getTimestamp();
+			}
+			if (isset($oEvent->DTSTART)) {
+				return $oEvent->DTSTART->getDateTime()->getTimestamp() + 86400;
+			}
+		} catch (\Throwable $oException) {
+			// fall through
+		}
+		return \time() + (7 * 86400);
 	}
 
 	/**
