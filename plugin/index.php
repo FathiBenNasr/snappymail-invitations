@@ -12,6 +12,9 @@
  * METHOD:REPLY itself, and mark the ORGANIZER with SCHEDULE-STATUS. Verified
  * against Cyrus IMAP, which answers such a PUT with SCHEDULE-STATUS=1.1.
  * That keeps this plugin free of iTIP construction and of any SMTP path.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Copyright (c) 2026 Convergent Cloud Computing
  */
 class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 {
@@ -19,11 +22,11 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		NAME        = 'Meeting Invitations',
 		AUTHOR      = 'Convergent Cloud Computing',
 		URL         = 'https://www.convergent.tn',
-		VERSION     = '1.2.0',
-		RELEASE     = '2026-08-13',
+		VERSION     = '1.2.1',
+		RELEASE     = '2026-08-15',
 		REQUIRED    = '2.36.0',
 		CATEGORY    = 'Calendar',
-		LICENSE     = 'MIT',
+		LICENSE     = 'AGPL-3.0-or-later',
 		DESCRIPTION = 'Accept, tentatively accept or decline meeting invitations and store them in your CalDAV calendar.';
 
 	/** Where processed cancellations are recorded, and how many to keep. */

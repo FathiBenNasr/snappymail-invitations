@@ -82,4 +82,12 @@ Fathi Ben Nasr <fbennasr@convergent.tn>
 
 ## Licence
 
-MIT.
+GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later), the same
+licence as SnappyMail itself, which this plugin loads into. The full text is in
+[LICENSE](LICENSE).
+
+Copyright (c) 2026 Convergent Cloud Computing.
+
+Releases up to and including v1.2.0 were published under the MIT licence. That
+grant is irrevocable for those copies: anyone who obtained the plugin under MIT
+keeps it under MIT.
