@@ -22,8 +22,8 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		NAME        = 'Meeting Invitations',
 		AUTHOR      = 'Convergent Cloud Computing',
 		URL         = 'https://www.convergent.tn',
-		VERSION     = '1.2.1',
-		RELEASE     = '2026-08-15',
+		VERSION     = '1.3.0',
+		RELEASE     = '2026-08-19',
 		REQUIRED    = '2.36.0',
 		CATEGORY    = 'Calendar',
 		LICENSE     = 'AGPL-3.0-or-later',
@@ -71,10 +71,24 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 	private function davUrl(string $sEmail) : string
 	{
 		$sTemplate = \trim($this->Config()->Get('plugin', 'caldav_url_template', ''));
+		$sDefaultDomain = \strtolower(\trim($this->Config()->Get('plugin', 'dav_default_domain', '')));
+
+		// Fall back to the caldav plugin's own settings when this one has not
+		// been filled in. Both plugins write to the same calendars on the same
+		// server, so two settings pages that must be kept agreeing is a support
+		// call waiting to happen - a URL corrected in one place and still wrong
+		// in the other looks exactly like a broken server. Whatever is
+		// configured here still wins, so an existing install is unaffected.
+		if (!\strlen($sTemplate)) {
+			$aBorrowed = $this->caldavPluginSettings();
+			$sTemplate = $aBorrowed['caldav_url_template'];
+			if (!\strlen($sDefaultDomain)) {
+				$sDefaultDomain = \strtolower($aBorrowed['dav_default_domain']);
+			}
+		}
 		if (!\strlen($sTemplate)) {
 			return '';
 		}
-		$sDefaultDomain = \strtolower(\trim($this->Config()->Get('plugin', 'dav_default_domain', '')));
 		$aParts  = \explode('@', $sEmail, 2);
 		$sLogin  = $aParts[0];
 		$sDomain = $aParts[1] ?? '';
@@ -85,6 +99,41 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 			'{login}'  => $sLogin,
 			'{domain}' => $sDomain
 		));
+	}
+
+	/**
+	 * The caldav plugin's stored settings, read straight from its config file.
+	 *
+	 * There is no supported way for one plugin to ask another for a setting -
+	 * Config() is scoped to the plugin that calls it - and the alternative,
+	 * making the calendar plugin a hard dependency, would stop invitations
+	 * working on a deployment that does not have it. Reading the file is
+	 * tolerant instead: absent, unreadable or unset all give the same empty
+	 * answer, and the settings on this plugin's own page still take precedence.
+	 *
+	 * @return array{caldav_url_template:string, dav_default_domain:string}
+	 */
+	private function caldavPluginSettings() : array
+	{
+		$aEmpty = array('caldav_url_template' => '', 'dav_default_domain' => '');
+		try {
+			if (!\defined('APP_PRIVATE_DATA')) {
+				return $aEmpty;
+			}
+			$sFile = \APP_PRIVATE_DATA . 'configs/plugin-caldav.json';
+			if (!\is_readable($sFile)) {
+				return $aEmpty;
+			}
+			$aData = \json_decode((string) \file_get_contents($sFile), true);
+			$aPlugin = (\is_array($aData) && isset($aData['plugin']) && \is_array($aData['plugin']))
+				? $aData['plugin'] : array();
+			return array(
+				'caldav_url_template' => \trim((string) ($aPlugin['caldav_url_template'] ?? '')),
+				'dav_default_domain'  => \trim((string) ($aPlugin['dav_default_domain'] ?? ''))
+			);
+		} catch (\Throwable $oException) {
+			return $aEmpty;
+		}
 	}
 
 	/**

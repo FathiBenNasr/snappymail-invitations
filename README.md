@@ -42,6 +42,14 @@ Admin → Plugins → invitations:
 Nothing is hardcoded; with no template configured the plugin declines to act
 rather than guess a URL.
 
+**Left empty, the URL template and default domain are borrowed from the
+`caldav` plugin's settings** if that plugin is installed. Both write to the same
+calendars on the same server, and two settings pages that have to be kept
+agreeing is a support call waiting to happen — a URL corrected in one place and
+still wrong in the other looks exactly like a broken server. Anything set here
+still wins, so an existing configuration is unaffected, and the calendar plugin
+is not a requirement: if it is absent the fields are simply empty as before.
+
 ## Cancellations and updates
 
 `METHOD:CANCEL` is recognised: the meeting is shown as cancelled and a single
