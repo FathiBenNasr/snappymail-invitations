@@ -1,9 +1,22 @@
+/* ─── Jetons Convergent (lot 2) ─────────────────────────────────────────────
+   Chaque couleur s'écrit  var(--cv-role, <la valeur d'avant>).
+   Le thème, s'il est installé, définit --cv-role sur :root et gagne quel que
+   soit l'ordre de chargement — une valeur définie bat toujours un repli. Sinon
+   la valeur d'origine s'applique, à l'identique.
+
+   Le bloc `prefers-color-scheme` ci-dessous est celui d'avant le lot 2, écrit
+   en jetons : il ne déclare que les *replis* `--cv-…-defaut`, jamais les rôles
+   eux-mêmes. Dès que le thème pose --cv-surface, --cv-text et --cv-line, ce
+   bloc devient sans effet — c'est ce qui met fin à la bascule où chaque greffon
+   décidait seul du thème sombre, contre le choix de l'utilisateur.
+   Référence commune : snappymail-theme/jetons/greffons.css
+   ───────────────────────────────────────────────────────────────────────── */
 /* SPDX-License-Identifier: AGPL-3.0-or-later
    Copyright (c) 2026 Convergent Cloud Computing */
 
 .meeting-invitation {
-	border: 1px solid var(--border-color, #ccc);
-	border-left: 4px solid var(--brand-color, #00639a);
+	border: 1px solid var(--cv-line, #ccc);
+	border-left: 4px solid var(--cv-accent, #00639a);
 	border-radius: 6px;
 	padding: 10px 14px;
 	margin: 8px 0;
@@ -16,4 +29,4 @@
 .meeting-invitation-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .meeting-invitation-result { margin-top: 8px; font-weight: 600; }
 .meeting-invitation-cancelled { margin: 6px 0; font-weight: 600; opacity: .85; }
-.meeting-invitation.cancelled { border-left-color: #e9322d; }
+.meeting-invitation.cancelled { border-left-color: var(--cv-danger, #e9322d); }
