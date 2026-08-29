@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<!-- Sans lui Chrome dessine 980 px de large quelle que soit la fenêtre, les
+     deux colonnes ne se replient jamais, et le banc déclare bon un volet qui
+     ne l'est pas. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invitations — aperçu du volet de lecture</title>
+
+<!-- Les rôles Convergent, tels que le lot 1 les écrit sur :root. Le greffon
+     n'en connaît aucun autre : s'il code une couleur en dur, la bascule
+     ci-dessous ne la déplacera pas et le banc le verra. -->
+<style>
+:root {
+	--cv-surface: #FFFFFF;
+	--cv-surface-raised: #FFFFFF;
+	--cv-surface-sunken: #F4F6F9;
+	--cv-line: #DDE3EC;
+	--cv-text: #16202E;
+	--cv-text-muted: #5A6779;
+	--cv-accent: #0052CC;
+	--cv-accent-fort: #003D99;
+	--cv-accent-weak: #E8F0FC;
+	--cv-signal: #E8A33D;
+	--cv-signal-weak: #FBF0DC;
+	--cv-signal-ink: #7A5410;
+	--cv-danger: #B3261E;
+}
+:root[data-theme="sombre"] {
+	--cv-surface: #141A22;
+	--cv-surface-raised: #232D3A;
+	--cv-surface-sunken: #1C242E;
+	--cv-line: #2A3441;
+	--cv-text: #E6EBF2;
+	--cv-text-muted: #9AA7B8;
+	--cv-accent: #5AA2F0;
+	--cv-accent-fort: #8FC2F6;
+	--cv-accent-weak: #1E2E4A;
+	--cv-signal: #E8A33D;
+	--cv-signal-weak: #3A2E17;
+	--cv-signal-ink: #F0C989;
+	--cv-danger: #E4796F;
+}
+
+/* La densité de SnappyMail, pas celle du navigateur : 13 px. Le volet de
+   lecture est une colonne, et c'est sa largeur — jamais celle de la fenêtre —
+   qui décide si la journée tient à côté de l'invitation. */
+* { box-sizing: border-box; }
+body {
+	margin: 0;
+	font: 13px/1.4 system-ui, sans-serif;
+	background: var(--cv-surface-sunken);
+	color: var(--cv-text);
+}
+#volet {
+	background: var(--cv-surface);
+	block-size: 100vh;
+	overflow-y: auto;
+	padding: 12px;
+}
+.attachmentsPlace { min-block-size: 1px; }
+button { font: inherit; padding: 3px 10px; }
+</style>
+
+<link rel="stylesheet" href="../../plugin/invitations.css">
+</head>
+<body>
+
+<!-- Le volet de lecture, réduit à ce que le greffon touche : un endroit où
+     poser sa carte, et rien d'autre du cœur. -->
+<div id="volet"><div id="vue"></div></div>
+
+<!-- Le gabarit que SnappyMail clone pour la vue message. Le greffon insère sa
+     carte dans son `content`, exactement comme en production. -->
+<template id="MailMessageView">
+	<div class="messageView">
+		<div class="attachmentsPlace"></div>
+	</div>
+</template>
+
+<script src="knockout.js"></script>
+<script>
+// `Element.fromHTML` est une extension de SnappyMail, pas une API du DOM. Sans
+// elle le greffon lève à l'insertion et la carte n'existe jamais — sans un mot.
+Element.fromHTML = (html) => {
+	const t = document.createElement('template');
+	t.innerHTML = html.trim();
+	return t.content.firstElementChild;
+};
+
+// `window.rl` doit exister **avant** le <script src> du greffon : il le lit à
+// son chargement, et déclaré après il vaut undefined pour toujours.
+const scenario = window.__scenario || {};
+
+window.rl = {
+	fetch: () => Promise.resolve({
+		status: 200,
+		text: () => Promise.resolve(scenario.ics || '')
+	}),
+	pluginRemoteRequest: (cb, action, params) => {
+		window.__demandes = window.__demandes || [];
+		window.__demandes.push({ action, params });
+		if ('InvitationDay' === action) {
+			setTimeout(() => cb(0, { Result: scenario.jour }), 0);
+		}
+	}
+};
+
+window.__erreurs = [];
+addEventListener('error', (e) => window.__erreurs.push(String(e.message)));
+</script>
+
+<script src="../../plugin/invitations.js"></script>
+
+<script>
+// Le montage, dans l'ordre du cœur — repris de `dev/Knoin/Knoin.js` :
+// l'évènement de création d'abord, c'est lui qui fait insérer la carte dans le
+// gabarit ; puis la liaison `template` sur le conteneur, qui clone le gabarit
+// et lie ce qu'il contient ; le message en dernier.
+//
+// Le Knockout de SnappyMail est une variante — `3.5.1-sm` — qui **n'expose pas**
+// `applyBindings` : le cœur passe par `applyBindingAccessorsToNode`, et c'est
+// donc ce que fait le banc. Utiliser le Knockout d'amont validerait un chemin
+// qui n'existe pas en production.
+(() => {
+	const vue = { message: ko.observable(null) };
+
+	dispatchEvent(new CustomEvent('rl-view-model.create', {
+		detail: Object.assign(vue, { viewModelTemplateID: 'MailMessageView' })
+	}));
+
+	ko.applyBindingAccessorsToNode(
+		document.getElementById('vue'),
+		{ template: () => ({ name: 'MailMessageView' }) },
+		vue
+	);
+
+	vue.message({
+		attachments: ko.observableArray([{
+			download: true,
+			mimeType: 'text/calendar',
+			fileName: 'invite.ics',
+			linkDownload: () => 'ics://1'
+		}])
+	});
+
+	window.__vue = vue;
+	window.__pret = () => !!document.querySelector('.mid-track');
+})();
+</script>
+</body>
+</html>

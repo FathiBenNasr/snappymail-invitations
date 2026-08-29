@@ -53,6 +53,57 @@ the event with your `PARTSTAT` set is what makes the server speak.
 Requires a CalDAV server with scheduling enabled. On Cyrus that is
 `caldav_allowscheduling` plus `imipnotifier` for delivery by mail.
 
+## The day beside the invitation
+
+Answering a meeting request is a scheduling decision, and it used to be taken
+blind: the mail says Tuesday 16:00, and the calendar is one screen away. Beside
+the buttons the plugin now draws **the day the meeting falls on**, read from the
+same CalDAV collection the answer will be written to — the proposed slot as a
+band, everything already booked as blocks over it, and whatever overlaps in
+amber.
+
+```mermaid
+flowchart LR
+    I["invitation<br/>DTSTART · DTEND"] --> W["the reader's day<br/>local midnight → local midnight"]
+    TZ(["the browser's zone<br/>checked against the zone database"]) -.-> W
+    W --> Q["REPORT calendar-query<br/>one collection, one day"]
+    Q --> D[(CalDAV)]
+    D --> E["expand the recurrences<br/>here, not on the server"]
+    E --> F["drop: this meeting's own copy ·<br/>TRANSPARENT · CANCELLED"]
+    F --> S["blocks, and which of them<br/>overlap the proposed slot"]
+    classDef n fill:#e6f4ea,stroke:#34a853
+    class S n
+```
+
+Four decisions in that chain are worth stating, because each has a failure mode
+that shows nothing:
+
+* **The day is cut in the reader's zone**, from local midnight to local
+  midnight — `+1 day`, never `+24 hours`: on the two nights a year a zone
+  changes offset the day is 23 or 25 hours long, and a fixed 24 shows tomorrow's
+  first meeting as today's last. The zone comes from the browser and is checked
+  against the zone database before it is used; unknown or absent falls back to
+  the organiser's, then to UTC.
+* **Recurrences are expanded here, not asked for.** `<C:expand>` is optional in
+  [RFC 4791](https://www.rfc-editor.org/rfc/rfc4791) and a server that ignores
+  it answers with the master events *silently* — the day would then be missing
+  every weekly meeting on it, and nothing would say so.
+* **Three things never count as busy**: this invitation's own copy (once
+  accepted it is in the calendar under the same `UID`, and it would be shown
+  clashing with itself), `TRANSP:TRANSPARENT` (its author said it does not take
+  their time), and `STATUS:CANCELLED` (a withdrawn meeting is not a reason to
+  refuse another). Whole-day entries are shown as chips above the strip and are
+  never a clash: a meeting is not impossible because a day is labelled.
+* **It fails open.** A calendar that cannot be read answers with an empty day
+  and says so in as many words, because a blank strip looks exactly like a free
+  afternoon — and because the one moment the calendar is down must not be the
+  moment the buttons stop working.
+
+One extra request per invitation opened, and none for a cancellation: the
+meeting is already gone, so there is no slot left to defend. Turn the whole
+thing off with **Show the day beside the invitation** if the round trip is not
+wanted.
+
 ## Configuration
 
 Admin → Plugins → invitations:
@@ -61,6 +112,7 @@ Admin → Plugins → invitations:
 | --- | --- |
 | CalDAV URL template | `https://dav.example.com/dav/calendars/user/{user}/Default/` |
 | DAV default domain | `example.com` — addresses in this domain use the local part only; leave empty to always use the full address |
+| Show the day beside the invitation | on — one extra request per invitation opened |
 | Verify the DAV server certificate | on |
 
 `{user}`, `{email}`, `{login}` and `{domain}` are substituted per account.
@@ -130,7 +182,15 @@ stored copy as usual.
 * Event details are read from the `VEVENT` only. `VTIMEZONE` carries its own
   `DTSTART` per transition rule, so reading the first one in the document shows
   a date like 1905 instead of the meeting.
-* Authentication reuses the account's own IMAP credentials.
+* Authentication reuses the account's own IMAP credentials — the day is read
+  with the reader's own rights, so nothing is shown that they could not open
+  themselves.
+* The day is read from the **one** collection the URL template names. A second
+  calendar, or a shared one, is not consulted: a clash living only there will
+  not be shown.
+* At most 60 blocks come back for one day. A calendar with more than that on a
+  single day belongs to a machine, and a strip of two hundred blocks tells the
+  reader nothing anyway.
 
 ## Authors
 

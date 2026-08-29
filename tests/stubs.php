@@ -105,8 +105,10 @@ namespace SnappyMail {
     class Log
     {
         public static array $lines = [];
+        public static function info(string $tag, string $msg): void { self::$lines[] = [$tag, $msg]; }
         public static function notice(string $tag, string $msg): void { self::$lines[] = [$tag, $msg]; }
         public static function warning(string $tag, string $msg): void { self::$lines[] = [$tag, $msg]; }
+        public static function error(string $tag, string $msg): void { self::$lines[] = [$tag, $msg]; }
     }
 }
 
@@ -152,6 +154,15 @@ namespace RainLoop\Plugins {
         public function addJsonHook(string $name, string $method): void { $this->hooks['json:' . $name] = $method; }
         public function Path(): string { return __DIR__ . '/..'; }
 
+        /**
+         * The JSON entry points, reduced to what a hook method sees: the
+         * parameters it was called with, and its answer handed straight back
+         * so a test can assert on the array instead of on an envelope.
+         */
+        public array $jsonParams = [];
+        public function jsonParam(string $key, $default = null) { return $this->jsonParams[$key] ?? $default; }
+        public function jsonResponse(string $function, $data) { return $data; }
+
         public function Config(): object
         {
             $cfg = $this->config;
@@ -170,4 +181,28 @@ namespace RainLoop\Plugins {
             };
         }
     }
+}
+
+namespace {
+    /**
+     * Sabre VObject, wherever this machine keeps it.
+     *
+     * The plugin runs inside SnappyMail, which bundles its own copy; the tests
+     * run outside it, so the library is looked up rather than assumed. The
+     * plugin file is never touched to suit the tests - it goes on calling
+     * \Sabre\VObject\Reader exactly as it does in production.
+     */
+    if (!\class_exists(\Sabre\VObject\Reader::class)) {
+        foreach ([
+            '/usr/share/php/Sabre/VObject4/autoload.php',
+            '/usr/share/php/Sabre/VObject/autoload.php',
+            __DIR__ . '/../vendor/autoload.php',
+        ] as $sCandidate) {
+            if (\is_file($sCandidate)) {
+                require_once $sCandidate;
+                break;
+            }
+        }
+    }
+    \define('INVITATIONS_TESTS_HAVE_VOBJECT', \class_exists(\Sabre\VObject\Reader::class));
 }

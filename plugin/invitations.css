@@ -30,3 +30,127 @@
 .meeting-invitation-result { margin-top: 8px; font-weight: 600; }
 .meeting-invitation-cancelled { margin: 6px 0; font-weight: 600; opacity: .85; }
 .meeting-invitation.cancelled { border-left-color: var(--cv-danger, #e9322d); }
+
+/* ─── La journée à côté de l'invitation ─────────────────────────────────────
+   Décider d'une réunion, c'est décider contre le reste de la journée. Le volet
+   montre donc l'invitation à gauche et la journée concernée à droite, et le
+   conflit se voit avant que le bouton ne soit cliqué.
+
+   Aucune propriété physique : `inline-start` est la gauche en français et la
+   droite en arabe, et l'axe des heures reste vertical dans les deux sens. Pas
+   de requête média non plus — la largeur qui compte est celle du volet de
+   lecture, pas celle de la fenêtre : les deux colonnes se replient d'elles-
+   mêmes par `flex-wrap` quand le volet devient étroit.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.meeting-invitation-body {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 14px;
+}
+.meeting-invitation-main { flex: 2 1 300px; min-inline-size: 0; }
+.meeting-invitation-day  { flex: 1 1 250px; min-inline-size: 230px; }
+
+/* Le jour *et* le créneau proposé sur la même ligne : dans la bande, leurs
+   heures se retrouvent sous ce qui est déjà réservé — c'est-à-dire exactement
+   le cas où on veut les lire. */
+.mid-label {
+	font-weight: 600;
+	font-size: .86em;
+	margin-block-end: 4px;
+	text-transform: capitalize;
+	font-variant-numeric: tabular-nums;
+	unicode-bidi: plaintext;
+}
+.mid-allday { display: flex; flex-wrap: wrap; gap: 4px; margin-block-end: 6px; }
+.mid-chip {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 999px;
+	font-size: .74em;
+	background: var(--cv-accent-weak, #e8f0fc);
+	color: var(--cv-text, #16202e);
+}
+
+.mid-grid { position: relative; display: flex; gap: 6px; block-size: 268px; }
+.mid-axis { position: relative; flex: none; inline-size: 3.1em; }
+.mid-tick {
+	position: absolute;
+	inset-inline-end: 0;
+	transform: translateY(-50%);
+	font-size: .7em;
+	font-variant-numeric: tabular-nums;
+	color: var(--cv-text-muted, #5a6779);
+}
+.mid-track {
+	position: relative;
+	flex: 1 1 auto;
+	min-inline-size: 0;
+	border: 1px solid var(--cv-line, #dde3ec);
+	border-radius: 4px;
+	background: var(--cv-surface-sunken, #f4f6f9);
+	overflow: hidden;
+}
+
+/* Le créneau proposé : un aplat, pas un liseré. C'est ce qu'on cherche des
+   yeux, et une teinte discrète disparaît en thème sombre. Les deux filets
+   d'accent en haut et en bas sont posés en `inset` plutôt qu'en `border` :
+   une bordure décalerait la bande de sa propre hauteur, et le créneau ne
+   tomberait plus en face de son heure sur l'axe. */
+.mid-slot {
+	position: absolute;
+	inset-inline: 0;
+	background: var(--cv-accent-weak, #e8f0fc);
+	border-inline-start: 3px solid var(--cv-accent, #0052cc);
+	box-shadow:
+		inset 0 1px 0 var(--cv-accent, #0052cc),
+		inset 0 -1px 0 var(--cv-accent, #0052cc);
+}
+/* Une réunion d'une heure fait vingt-cinq pixels de haut : deux lignes n'y
+   tiennent pas, et la deuxième était coupée en son milieu. Le bloc tient donc
+   sur **une** ligne — le nom, puis l'heure —, et ce qui dépasse est tronqué
+   par la fin, pas par le bas. L'heure exacte reste dans l'infobulle. */
+.mid-block {
+	position: absolute;
+	overflow: hidden;
+	padding: 0 4px;
+	border: 1px solid var(--cv-line, #dde3ec);
+	border-radius: 3px;
+	background: var(--cv-surface-raised, #fff);
+	color: var(--cv-text, #16202e);
+	font-size: .7em;
+	line-height: 1.5;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	/* Le sens du bloc est celui de son contenu, pas celui de la page.
+	   `text-overflow` tronque par la *fin logique* : dans une page en arabe,
+	   une réunion nommée en français se faisait couper par la tête —
+	   « …nuel · 09:30 » pour « Entretien annuel ». `plaintext` fait décider le
+	   sens par le premier caractère fort, si bien qu'un nom latin se tronque
+	   par la queue et un nom arabe aussi. */
+	unicode-bidi: plaintext;
+}
+/* Le signal — ambre, jamais rouge : un chevauchement n'est pas une erreur,
+   c'est une information sur laquelle la personne décide. */
+.mid-block.clash {
+	border-color: var(--cv-signal, #e8a33d);
+	background: var(--cv-signal-weak, #fbf0dc);
+	color: var(--cv-signal-ink, #7a5410);
+}
+/* Le nom d'abord, l'heure ensuite et sur la même ligne : c'est l'heure — déjà
+   lisible sur l'axe d'à côté — qui disparaît quand le bloc est étroit. */
+.mid-block-name { font-weight: 600; }
+.mid-block-time { font-variant-numeric: tabular-nums; opacity: .75; }
+.mid-block-time::before { content: " · "; }
+
+.mid-note {
+	margin-block-start: 6px;
+	font-size: .78em;
+	color: var(--cv-text-muted, #5a6779);
+	/* Même raison : « 1 event overlaps this slot. » se réordonnait en
+	   « .event overlaps this slot 1 » dans une page en arabe — le chiffre et
+	   le point sont des caractères neutres, et ils suivaient la page. */
+	unicode-bidi: plaintext;
+}
+.mid-note.clash { color: var(--cv-signal-ink, #7a5410); font-weight: 600; }

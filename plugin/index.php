@@ -22,23 +22,32 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 		NAME        = 'Meeting Invitations',
 		AUTHOR      = 'Convergent Cloud Computing',
 		URL         = 'https://www.convergent.tn',
-		VERSION     = '1.3.0',
-		RELEASE     = '2026-08-19',
+		VERSION     = '1.4.0',
+		RELEASE     = '2026-08-29',
 		REQUIRED    = '2.36.0',
 		CATEGORY    = 'Calendar',
 		LICENSE     = 'AGPL-3.0-or-later',
-		DESCRIPTION = 'Accept, tentatively accept or decline meeting invitations and store them in your CalDAV calendar.';
+		DESCRIPTION = 'Accept, tentatively accept or decline meeting invitations, with the day they land on shown beside them, and store them in your CalDAV calendar.';
 
 	/** Where processed cancellations are recorded, and how many to keep. */
 	private const
 		CANCELLED_KEY = 'invitations_cancelled',
 		CANCELLED_MAX = 200;
 
+	/**
+	 * The day drawn beside an invitation. The cap is on what is *returned*,
+	 * not on what the server may hold: a calendar with two hundred blocks on
+	 * one day is a machine account, and a strip of two hundred blocks tells
+	 * the reader nothing anyway.
+	 */
+	private const DAY_MAX_BLOCKS = 60;
+
 	public function Init() : void
 	{
 		$this->addJs('invitations.js');
 		$this->addCss('invitations.css');
 		$this->addJsonHook('InvitationRespond', 'DoInvitationRespond');
+		$this->addJsonHook('InvitationDay', 'DoInvitationDay');
 	}
 
 	protected function configMapping() : array
@@ -58,6 +67,13 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 				->SetDescription('Addresses in this domain are addressed by local part only.'
 					. ' Leave empty to always use the full address.')
 				->SetDefaultValue(''),
+			\RainLoop\Plugins\Property::NewInstance('day_agenda')
+				->SetLabel('Show the day beside the invitation')
+				->SetType(\RainLoop\Enumerations\PluginPropertyType::BOOL)
+				->SetDescription('Reads the day the meeting falls on from the same CalDAV'
+					. ' collection and draws it next to the buttons, so a clash is visible'
+					. ' before the answer is given. One extra request per invitation opened.')
+				->SetDefaultValue(true),
 			\RainLoop\Plugins\Property::NewInstance('verify_peer')
 				->SetLabel('Verify the DAV server certificate')
 				->SetType(\RainLoop\Enumerations\PluginPropertyType::BOOL)
@@ -272,6 +288,328 @@ class InvitationsPlugin extends \RainLoop\Plugins\AbstractPlugin
 			\SnappyMail\Log::error('Invitations', $oException->getMessage());
 			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => $oException->getMessage()]);
 		}
+	}
+
+	/**
+	 * The day an invitation lands on, as the user's own calendar already holds it.
+	 *
+	 * Answering a meeting request is a scheduling decision, and today it is
+	 * taken blind: the mail says Tuesday 16:00 and the calendar is one screen
+	 * away. This reads the same CalDAV collection the answer is written to,
+	 * for that one day, and hands back a thin list of blocks - start, end,
+	 * summary - which is all a strip beside the buttons needs.
+	 *
+	 * Nothing here is authoritative and nothing here blocks. A collection that
+	 * cannot be read answers `success` with an empty day and a reason: the
+	 * invitation must stay answerable when the calendar is down, which is
+	 * exactly when it is least convenient to be asked to dismiss an error.
+	 */
+	public function DoInvitationDay() : array
+	{
+		$oActions = $this->Manager()->Actions();
+		$oAccount = $oActions->getAccountFromToken();
+		if (!$oAccount) {
+			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Not logged in']);
+		}
+		if (!$this->Config()->Get('plugin', 'day_agenda', true)) {
+			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Disabled']);
+		}
+
+		$sIcs = (string) $this->jsonParam('Ics', '');
+		if (!\strlen($sIcs)) {
+			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'No calendar data']);
+		}
+
+		try {
+			$oVCal = \Sabre\VObject\Reader::read($sIcs, \Sabre\VObject\Reader::OPTION_FORGIVING);
+			if (!($oVCal instanceof \Sabre\VObject\Component\VCalendar) || !isset($oVCal->VEVENT)) {
+				return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Not a calendar event']);
+			}
+			$oEvent = $oVCal->VEVENT;
+			if (!isset($oEvent->DTSTART)) {
+				return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => 'Event has no start']);
+			}
+
+			$oTz = $this->readTimeZone((string) $this->jsonParam('Tz', ''), $oEvent);
+			// The span first, then the day around it: a whole-day invitation
+			// has a floating DATE for a start, and reading it before the zone
+			// is known puts it on midnight of whatever zone PHP was started
+			// with - which is the day before, half the time.
+			list($oSlotStart, $oSlotEnd) = self::eventSpan($oEvent, $oTz);
+			list($oFrom, $oTo) = self::dayWindow($oSlotStart, $oTz);
+
+			$aAnswer = array(
+				'success'  => true,
+				'timezone' => $oTz->getName(),
+				'from'     => $oFrom->format(\DateTimeInterface::ATOM),
+				'to'       => $oTo->format(\DateTimeInterface::ATOM),
+				'allDay'   => !$oEvent->DTSTART->hasTime(),
+				'slot'     => array(
+					'start' => $oSlotStart->format(\DateTimeInterface::ATOM),
+					'end'   => $oSlotEnd->format(\DateTimeInterface::ATOM)
+				),
+				'busy'     => array(),
+				'read'     => false
+			);
+
+			$sUrl = $this->davUrl($oAccount->Email());
+			if (!\strlen($sUrl)) {
+				$aAnswer['error'] = 'No CalDAV URL configured for this plugin';
+				return $this->jsonResponse(__FUNCTION__, $aAnswer);
+			}
+
+			$sXml = $this->report($oAccount, $sUrl, self::calendarQuery($oFrom, $oTo));
+			if (null === $sXml) {
+				$aAnswer['error'] = 'The calendar could not be read';
+				return $this->jsonResponse(__FUNCTION__, $aAnswer);
+			}
+
+			$aAnswer['read'] = true;
+			$aAnswer['busy'] = self::busyBlocks(self::calendarData($sXml), $oFrom, $oTo,
+				(string) $oEvent->UID, $oTz, $oSlotStart, $oSlotEnd);
+
+			return $this->jsonResponse(__FUNCTION__, $aAnswer);
+		} catch (\Throwable $oException) {
+			\SnappyMail\Log::notice('Invitations', 'day view: ' . $oException->getMessage());
+			return $this->jsonResponse(__FUNCTION__, ['success' => false, 'error' => $oException->getMessage()]);
+		}
+	}
+
+	/**
+	 * Which zone the day is cut in.
+	 *
+	 * The reader's own zone wins: they are the one deciding, and 16:00 in
+	 * Paris is not the hour they are looking at in Tunis. It arrives from the
+	 * browser, so it is checked against the zone database rather than trusted
+	 * - an identifier goes on to build a day boundary, and a name PHP does not
+	 * know throws. Unknown or absent falls back to the zone the organiser
+	 * wrote into the invitation, then to UTC.
+	 */
+	private function readTimeZone(string $sWanted, $oEvent) : \DateTimeZone
+	{
+		$sWanted = \trim($sWanted);
+		if (\strlen($sWanted) && \in_array($sWanted, \DateTimeZone::listIdentifiers(), true)) {
+			return new \DateTimeZone($sWanted);
+		}
+		try {
+			if (isset($oEvent->DTSTART)) {
+				return $oEvent->DTSTART->getDateTime()->getTimezone();
+			}
+		} catch (\Throwable $oException) {
+			// An invitation with an unreadable zone still has a day in UTC.
+		}
+		return new \DateTimeZone('UTC');
+	}
+
+	/**
+	 * The local day containing an instant, as a half-open window.
+	 *
+	 * `+1 day` rather than `+24 hours` on purpose: on the night a zone changes
+	 * offset the day is 23 or 25 hours long, and a fixed 24 either loses an
+	 * hour of the evening or borrows one from tomorrow.
+	 *
+	 * @return array{0:\DateTimeImmutable, 1:\DateTimeImmutable}
+	 */
+	private static function dayWindow(\DateTimeInterface $oInstant, \DateTimeZone $oTz) : array
+	{
+		$oLocal = \DateTimeImmutable::createFromInterface($oInstant)->setTimezone($oTz);
+		$oFrom  = $oLocal->setTime(0, 0, 0);
+		return array($oFrom, $oFrom->modify('+1 day'));
+	}
+
+	/**
+	 * When a VEVENT starts and ends, whichever way it says so.
+	 *
+	 * DTEND, then DURATION, then the RFC 5545 defaults: a whole-day event with
+	 * neither lasts one day, a timed one lasts nothing.
+	 *
+	 * The zone is a *reference*, not an override: a DTSTART carrying a TZID
+	 * keeps it, and the argument decides only where a floating time or a bare
+	 * DATE lands. Passing it matters for whole-day entries, which otherwise
+	 * fall on midnight of whatever zone the PHP process was started with.
+	 *
+	 * @return array{0:\DateTimeImmutable, 1:\DateTimeImmutable}
+	 */
+	private static function eventSpan($oEvent, ?\DateTimeZone $oTz = null) : array
+	{
+		$oStart = \DateTimeImmutable::createFromInterface($oEvent->DTSTART->getDateTime($oTz));
+		if (isset($oEvent->DTEND)) {
+			return array($oStart, \DateTimeImmutable::createFromInterface($oEvent->DTEND->getDateTime($oTz)));
+		}
+		if (isset($oEvent->DURATION)) {
+			return array($oStart, $oStart->add(
+				\Sabre\VObject\DateTimeParser::parseDuration((string) $oEvent->DURATION)));
+		}
+		return array($oStart, $oEvent->DTSTART->hasTime() ? $oStart : $oStart->modify('+1 day'));
+	}
+
+	/**
+	 * The REPORT body asking one collection for one day.
+	 *
+	 * The two instants are formatted, never interpolated: `format()` on a
+	 * DateTime can only ever produce `\d{8}T\d{6}Z`, so no caller-supplied
+	 * character reaches the XML. That is the reason this takes DateTimes and
+	 * not strings.
+	 *
+	 * Recurrences are expanded here rather than asked for with `<C:expand>`:
+	 * expand is optional in RFC 4791 and a server that ignores it answers with
+	 * the master events, silently, and the day would then be missing every
+	 * weekly meeting on it.
+	 */
+	private static function calendarQuery(\DateTimeInterface $oFrom, \DateTimeInterface $oTo) : string
+	{
+		$sFrom = $oFrom->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z');
+		$sTo   = $oTo->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z');
+		return '<?xml version="1.0" encoding="utf-8" ?>'
+			. '<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">'
+			. '<D:prop><D:getetag /><C:calendar-data /></D:prop>'
+			. '<C:filter><C:comp-filter name="VCALENDAR">'
+			. '<C:comp-filter name="VEVENT">'
+			. '<C:time-range start="' . $sFrom . '" end="' . $sTo . '"/>'
+			. '</C:comp-filter></C:comp-filter></C:filter>'
+			. '</C:calendar-query>';
+	}
+
+	/**
+	 * The calendar objects out of a multistatus, by namespace and not by tag.
+	 *
+	 * Servers differ on the prefix - `C:`, `cal:`, `caldav:` - so matching the
+	 * literal name finds nothing on half of them. LIBXML_NONET is set because
+	 * this document comes off the network: nothing in it may cause a fetch.
+	 *
+	 * @return string[]
+	 */
+	private static function calendarData(string $sXml) : array
+	{
+		$aResult = array();
+		if (!\strlen(\trim($sXml))) {
+			return $aResult;
+		}
+		$bPrevious = \libxml_use_internal_errors(true);
+		try {
+			$oDoc = new \DOMDocument();
+			if (!$oDoc->loadXML($sXml, \LIBXML_NONET | \LIBXML_NOERROR | \LIBXML_NOWARNING)) {
+				return $aResult;
+			}
+			foreach ($oDoc->getElementsByTagNameNS('urn:ietf:params:xml:ns:caldav', 'calendar-data') as $oNode) {
+				$sText = \trim((string) $oNode->textContent);
+				if (\strlen($sText)) {
+					$aResult[] = $sText;
+				}
+			}
+		} catch (\Throwable $oException) {
+			// A malformed answer is an empty day, not an exception in the mail view.
+		} finally {
+			\libxml_clear_errors();
+			\libxml_use_internal_errors($bPrevious);
+		}
+		return $aResult;
+	}
+
+	/**
+	 * The blocks to draw: what actually occupies the reader on that day.
+	 *
+	 * Three things are left out on purpose. The invitation's own UID, because
+	 * a meeting already accepted would otherwise be shown clashing with
+	 * itself. TRANSP:TRANSPARENT, because its author said it does not take
+	 * their time. STATUS:CANCELLED, because a withdrawn meeting is not a
+	 * reason to refuse another.
+	 *
+	 * Whole-day entries are kept but never counted as a clash: "on leave" and
+	 * "public holiday" are worth seeing above the strip, and a meeting is not
+	 * impossible because a day is labelled.
+	 *
+	 * @param string[] $aObjects
+	 */
+	private static function busyBlocks(array $aObjects, \DateTimeInterface $oFrom, \DateTimeInterface $oTo,
+		string $sSkipUid, \DateTimeZone $oTz, \DateTimeInterface $oSlotStart, \DateTimeInterface $oSlotEnd) : array
+	{
+		$aBlocks = array();
+		$sSkipUid = \trim($sSkipUid);
+
+		foreach ($aObjects as $sObject) {
+			try {
+				$oVCal = \Sabre\VObject\Reader::read($sObject, \Sabre\VObject\Reader::OPTION_FORGIVING);
+				if (!($oVCal instanceof \Sabre\VObject\Component\VCalendar)) {
+					continue;
+				}
+				// Recurrence is resolved here: the day needs the instances that
+				// fall on it, not the rule that generates them.
+				try {
+					$oVCal = $oVCal->expand($oFrom, $oTo, $oTz);
+				} catch (\Throwable $oException) {
+					// A rule this library will not walk still has a master
+					// event, and drawing that is better than drawing nothing.
+				}
+				if (!isset($oVCal->VEVENT)) {
+					continue;
+				}
+				foreach ($oVCal->VEVENT as $oEvent) {
+					if (!isset($oEvent->DTSTART)) {
+						continue;
+					}
+					$sUid = \trim((string) ($oEvent->UID ?? ''));
+					if (\strlen($sSkipUid) && $sUid === $sSkipUid) {
+						continue;
+					}
+					if ('CANCELLED' === \strtoupper(\trim((string) ($oEvent->STATUS ?? '')))
+					 || 'TRANSPARENT' === \strtoupper(\trim((string) ($oEvent->TRANSP ?? '')))) {
+						continue;
+					}
+					list($oStart, $oEnd) = self::eventSpan($oEvent, $oTz);
+					// Half-open on both sides: a meeting ending at 14:00 does
+					// not occupy the one starting at 14:00.
+					if ($oStart >= $oTo || $oEnd <= $oFrom) {
+						continue;
+					}
+					$bAllDay = !$oEvent->DTSTART->hasTime();
+					$aBlocks[] = array(
+						'uid'     => $sUid,
+						'summary' => \trim((string) ($oEvent->SUMMARY ?? '')),
+						'start'   => $oStart->format(\DateTimeInterface::ATOM),
+						'end'     => $oEnd->format(\DateTimeInterface::ATOM),
+						'allDay'  => $bAllDay,
+						'clash'   => !$bAllDay && $oStart < $oSlotEnd && $oEnd > $oSlotStart,
+						'sort'    => $oStart->getTimestamp()
+					);
+				}
+			} catch (\Throwable $oException) {
+				// One unreadable object must not empty the whole day.
+				continue;
+			}
+		}
+
+		\usort($aBlocks, function (array $a, array $b) {
+			return $a['sort'] <=> $b['sort'];
+		});
+		$aBlocks = \array_slice($aBlocks, 0, self::DAY_MAX_BLOCKS);
+		foreach ($aBlocks as &$aBlock) {
+			unset($aBlock['sort']);
+		}
+		unset($aBlock);
+		return $aBlocks;
+	}
+
+	/**
+	 * Issue a REPORT and hand back the multistatus body, or null.
+	 *
+	 * Depth is sent because RFC 4791 defines a calendar-query against a
+	 * collection at depth 1; a server that defaults to 0 answers about the
+	 * collection itself and returns no events at all, which reads exactly like
+	 * an empty day.
+	 */
+	private function report(\RainLoop\Model\Account $oAccount, string $sUrl, string $sBody) : ?string
+	{
+		$oResponse = $this->http($oAccount)->doRequest('REPORT', $sUrl, $sBody, array(
+			'Content-Type' => 'application/xml; charset=utf-8',
+			'Depth' => '1'
+		));
+		$iStatus = $oResponse ? $oResponse->status : 0;
+		if (207 !== $iStatus) {
+			\SnappyMail\Log::notice('Invitations', "REPORT {$sUrl} ({$iStatus})");
+			return null;
+		}
+		return $oResponse->body;
 	}
 
 	/**
