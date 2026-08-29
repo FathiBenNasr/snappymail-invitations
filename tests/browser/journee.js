@@ -144,9 +144,11 @@ async function ouvrir(navigateur, { largeur = 900, hauteur = 900, jour, rtl = fa
 let capture = 0;
 async function garder(page, nom) {
 	if (!CAPTURES) return;
-	await page.screenshot({
-		path: path.join(CAPTURES, `journee-${String(++capture).padStart(2, '0')}-${nom}.png`),
-	});
+	const chemin = path.join(CAPTURES, `journee-${String(++capture).padStart(2, '0')}-${nom}.png`);
+	// La carte, pas la page : une capture destinee au depot doit montrer ce
+	// que le greffon dessine, pas les six cents pixels de blanc autour.
+	const carte = await page.$('.meeting-invitation');
+	await (carte || page).screenshot({ path: chemin });
 }
 
 const controles = [];
