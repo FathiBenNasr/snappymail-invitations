@@ -64,6 +64,10 @@ cd snappymail-invitations
 podman exec puppeteer-test mkdir -p /essai/invitations/tests/browser /essai/invitations/plugin
 podman cp tests/browser/apercu.html  puppeteer-test:/essai/invitations/tests/browser/
 podman cp tests/browser/journee.js   puppeteer-test:/essai/invitations/tests/browser/
+# ⚠️ Le nom d'arrivée n'est pas celui de départ : `apercu.html` charge
+# `knockout.js`. Déposé sous son nom d'origine, le banc s'arrête sur
+# `TypeError: Cannot read properties of undefined (reading 'r')` — knockout est
+# absent, et c'est le greffon qui tombe, pas la page. Vérifié le 30 août 2026.
 podman cp ../snappymail/vendors/knockout/build/output/knockout-latest.js \
                                      puppeteer-test:/essai/invitations/tests/browser/knockout.js
 podman cp plugin/invitations.js      puppeteer-test:/essai/invitations/plugin/
