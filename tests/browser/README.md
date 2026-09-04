@@ -59,24 +59,21 @@ Le Knockout est celui de SnappyMail, pris dans le dépôt voisin — pas une cop
 versionnée ici.
 
 ```sh
-cd snappymail-invitations
-
-podman exec puppeteer-test mkdir -p /essai/invitations/tests/browser /essai/invitations/plugin
-podman cp tests/browser/apercu.html  puppeteer-test:/essai/invitations/tests/browser/
-podman cp tests/browser/journee.js   puppeteer-test:/essai/invitations/tests/browser/
-# ⚠️ Le nom d'arrivée n'est pas celui de départ : `apercu.html` charge
-# `knockout.js`. Déposé sous son nom d'origine, le banc s'arrête sur
-# `TypeError: Cannot read properties of undefined (reading 'r')` — knockout est
-# absent, et c'est le greffon qui tombe, pas la page. Vérifié le 30 août 2026.
-podman cp ../snappymail/vendors/knockout/build/output/knockout-latest.js \
-                                     puppeteer-test:/essai/invitations/tests/browser/knockout.js
-podman cp plugin/invitations.js      puppeteer-test:/essai/invitations/plugin/
-podman cp plugin/invitations.css     puppeteer-test:/essai/invitations/plugin/
-podman exec puppeteer-test ln -sf /app/scripts/node_modules \
-                                  /essai/invitations/tests/browser/node_modules
-
-podman exec puppeteer-test node /essai/invitations/tests/browser/journee.js
+sh tests/browser/preparer.sh
 ```
+
+Elle recopie le banc, **les deux fichiers du greffon** et knockout — ce dernier
+**sous le nom `knockout.js`**, qui n'est pas son nom de départ : `apercu.html`
+charge ce nom-là, et déposé autrement le banc s'arrête sur
+`TypeError: Cannot read properties of undefined (reading 'r')`, où c'est le
+greffon qui tombe et non la page.
+
+⚠️ **Pourquoi une commande, et non les huit lignes d'avant.** Le 4 septembre
+2026, le banc de `snappymail-servicedesk` s'est révélé éprouver depuis cinq
+jours une copie du greffon **d'avant son garde `authentifie()`** : son README
+demandait de rafraîchir les copies à la main, et personne ne l'avait fait. Il
+restait vert. *Une copie qu'il faut penser à rafraîchir diverge ; une commande
+qui la rafraîchit toujours ne le peut pas.*
 
 **Les cinq copies ne sont pas facultatives.** Sans elles la page se charge sans
 le greffon, la carte ne se dessine pas, et le banc annonce trente-six échecs
