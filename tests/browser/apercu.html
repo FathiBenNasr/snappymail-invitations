@@ -63,6 +63,18 @@ body {
 button { font: inherit; padding: 3px 10px; }
 </style>
 
+<!-- ⚠️ **La feuille du cœur, reprise de la production** — ajoutée le
+     5 septembre 2026. Sans elle, ce banc affirmait qu'une mise en page tient
+     alors qu'il ne chargeait jamais la feuille qui peut la défaire : les
+     déclarations ci-dessus n'imitent que les rôles de couleur, pas les règles
+     de `app.css`. La forme du défaut a été rapportée par la session
+     `VisualTest` après son parcours contre la production — *une coque qui omet
+     une feuille du cœur cache une panne* (§29 du TODO de la suite).
+
+     Elle est **recopiée à chaque passage** par `preparer.sh`, comme le banc du
+     rail le fait pour le thème : une feuille figée dans le dépôt vieillit en
+     silence pendant que la production avance. -->
+<link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="../../plugin/invitations.css">
 </head>
 <body>

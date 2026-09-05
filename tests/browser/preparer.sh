@@ -18,12 +18,16 @@ set -eu
 RACINE=$(cd "$(dirname "$0")/../.." && pwd)
 CIBLE=${CIBLE:-/essai/invitations}
 KNOCKOUT=${KNOCKOUT:-../snappymail/vendors/knockout/build/output/knockout-latest.js}
+COEUR=${COEUR:-/var/www/vhosts/fastmail.convergent.tn/htdocs/snappymail/v/2.38.2/static/css/app.css}
 cd "$RACINE"
 
 podman exec puppeteer-test mkdir -p "$CIBLE/tests/browser" "$CIBLE/plugin"
 podman cp tests/browser/apercu.html "puppeteer-test:$CIBLE/tests/browser/"
 podman cp tests/browser/journee.js  "puppeteer-test:$CIBLE/tests/browser/"
 podman cp "$KNOCKOUT" "puppeteer-test:$CIBLE/tests/browser/knockout.js"
+# La feuille du cœur, telle que la production la sert. Reprise à chaque passage :
+# figée dans le dépôt, elle vieillirait en silence.
+podman cp "$COEUR" "puppeteer-test:$CIBLE/tests/browser/app.css"
 # Le greffon lui-même, à chaque passage.
 podman cp plugin/invitations.js  "puppeteer-test:$CIBLE/plugin/"
 podman cp plugin/invitations.css "puppeteer-test:$CIBLE/plugin/"

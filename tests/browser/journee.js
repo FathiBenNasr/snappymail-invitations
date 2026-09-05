@@ -117,6 +117,20 @@ function mesurer() {
 		bidi: qa('.mid-block, .mid-note, .mid-label').map((e) => couleur(e, 'unicodeBidi')),
 
 		debordement: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+		// Le nombre de règles réellement lues depuis `app.css` : un `<link>`
+		// présent ne prouve rien — un 404 laisse la feuille dans la liste, avec
+		// zéro règle. C'est le compte qui fait foi.
+		reglesCoeur: (() => {
+			try {
+				return [...document.styleSheets]
+					.filter((f) => f.href && f.href.endsWith('app.css'))
+					.reduce((n, f) => {
+						try { return n + f.cssRules.length; } catch (e) { return n; }
+					}, 0);
+			} catch (e) {
+				return 0;
+			}
+		})(),
 		erreurs: window.__erreurs || [],
 		demandes: (window.__demandes || []).map((d) => d.action),
 	};
@@ -170,6 +184,17 @@ const verifier = (nom, condition, detail) => {
 			const { page, mesure: m } = await ouvrir(navigateur, {
 				jour: journee({ busy: [bloc('14:00', '15:00'), bloc('16:30', '17:00', { summary: 'Point client' })] }),
 			});
+
+			// ⚠️ **La feuille du cœur doit être chargée, et il faut le dire.**
+			// Sans ce contrôle, un `app.css` absent — fichier non recopié,
+			// chemin changé après une montée de SnappyMail — ramènerait le banc
+			// à ce qu'il était avant le 5 septembre 2026 : une coque qui juge
+			// une mise en page **sans la feuille qui peut la défaire**, et
+			// tous les autres contrôles resteraient verts. C'est exactement la
+			// forme de panne que la journée a cherchée partout ailleurs : ce
+			// qui manque ne fait rien échouer.
+			verifier('la feuille du cœur est chargée', 0 < m.reglesCoeur,
+				`${m.reglesCoeur} règles lues depuis app.css`);
 
 			verifier('la carte de l’invitation est rendue', m.carte);
 			verifier('les trois boutons de réponse sont là', 3 === m.boutons, `${m.boutons} boutons`);
